@@ -1,124 +1,81 @@
-# ZENTRA Hydro Event Analyzer
+# ZENTRA Hydro Event Analyzer - ZENTRA Cloud 1.0
 
-A Streamlit interface for combining:
+This version is for **ZENTRA Cloud 1.0** and uses the **v4 Pull API**, not v5.
 
-- precipitation from **z6-10438** (default), and
-- water level from **z6-10439** (default),
+## Correct authentication
 
-through the **ZENTRA Cloud v5 API**.
+In ZENTRA Cloud 1.0:
 
-The app downloads both time series, lets you choose the exact sensor/measurement stream returned by the API, automatically detects rainfall events, and produces both a raw graph and an annotated event graph.
+1. Open **API**
+2. Open the **Keys** tab
+3. Click **Copy Token**
 
-## Extracted event parameters
-
-For the selected event, the app calculates:
-
-- rainfall start
-- last positive-rainfall interval
-- rainfall duration
-- total precipitation
-- peak interval precipitation
-- peak rainfall intensity in mm/h
-- rainfall centroid
-- peak water level and peak time
-- **t_lag** = peak-water-level time minus rainfall-centroid time
-- **T_c** = rainfall-start time to peak-water-level time
-- pre-event median water level
-- rise from baseline to peak
-
-The duration follows the convention in the supplied example: if the logger interval is 5 minutes, a sequence from 18:05 through 19:15 has duration `(19:15 - 18:05) + 5 min = 75 min`.
-
-## ZENTRA Cloud v5 API
-
-The app calls:
+The app accepts either:
 
 ```text
-GET https://api.zentracloud.io/v5/devices/{device_id}/data
+31aa...
 ```
 
-with the API key in:
+or:
 
 ```text
-X-API-Key: <your key>
+Token 31aa...
 ```
 
-It follows `pagination.next_url` exactly when the API returns another page.
-
-## Install
-
-Create a Python environment, then:
-
-```bash
-pip install -r requirements.txt
-```
-
-## API key
-
-### Recommended
-
-Copy:
+Internally it sends:
 
 ```text
-.streamlit/secrets.toml.example
+Authorization: Token 31aa...
 ```
 
-to:
+## Correct endpoint
+
+EU accounts:
 
 ```text
-.streamlit/secrets.toml
+https://zentracloud.eu/api/v4/get_readings/
 ```
 
-and insert your API key there.
+US accounts:
 
-Alternatively, set an environment variable:
-
-### Windows PowerShell
-
-```powershell
-$env:ZENTRA_API_KEY="your-new-api-key"
-streamlit run app.py
+```text
+https://zentracloud.com/api/v4/get_readings/
 ```
 
-### Windows CMD
+The app has a server selector in the sidebar.
 
-```cmd
-set ZENTRA_API_KEY=your-new-api-key
-streamlit run app.py
-```
+**Do not add a Push API Endpoint.** The Endpoint screen in ZENTRA Cloud 1.0 is for a webhook/push integration and is unrelated to this Streamlit application's historical data pull.
 
-### Linux/macOS
+## Devices configured by default
 
-```bash
-export ZENTRA_API_KEY="your-new-api-key"
-streamlit run app.py
-```
-
-If no key is stored, the app shows a password-type input in the sidebar.
+- Precipitation: `z6-10438`
+- Water level: `z6-10439`
 
 ## Run
 
 ```bash
+pip install -r requirements.txt
 streamlit run app.py
 ```
 
-Your browser will open the interface.
+## Important v4 limit
 
-## Suggested settings
+ZENTRA Cloud 1.0 v4 documents a limit of one API call per minute per device. The application therefore requests up to 2000 records in one call and asks you to narrow the selected date window instead of automatically hammering the next page.
 
-For 5-minute rainfall data, start with:
+## Event metrics
 
-- dry gap separating events: **30 min**
-- rain threshold: **0 mm**
-- pre-event buffer: **30 min**
-- post-event search: **180 min**
-- timezone: **Europe/Bucharest**
+The event interface calculates:
 
-If two rainfall bursts should be treated as one hydrological event, increase the dry gap. If the water-level line is still rising at the end of the graph, increase the post-event search window.
+- rainfall start and end
+- duration
+- total rainfall
+- peak interval rainfall
+- peak rainfall intensity
+- rainfall centroid
+- peak water level and its time
+- `t_lag`: rainfall centroid to water-level peak
+- `T_c`: rainfall start to water-level peak, matching the supplied annotated graph
+- pre-event median level
+- rise to peak
 
-## Important hydrological note
-
-The app labels `T_c` as an **operational rainfall-start-to-hydrograph-peak time**, because that is the convention shown in the supplied annotated example. In strict hydrological terminology, time of concentration can be defined differently depending on the method and catchment model. The label can be changed easily if you want another definition.
-
-## Security
-
-Do not hard-code the API key in `app.py`, and do not commit `.streamlit/secrets.toml`.
+It provides both the raw and annotated event figures and CSV/PNG export.

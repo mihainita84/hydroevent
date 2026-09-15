@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 from datetime import date, datetime, time, timedelta
-import io
 import os
 
 import pandas as pd
 import streamlit as st
 
-from zentra_api import ZentraV5Client, ZentraAPIError
+from zentra_api import ZentraV4Client, ZentraAPIError
 from hydrology import (
     analyze_event,
     build_event_figure,
@@ -21,6 +20,11 @@ PRECIP_DEVICE_DEFAULT = "z6-10438"
 WATER_DEVICE_DEFAULT = "z6-10439"
 LOCAL_TZ_DEFAULT = "Europe/Bucharest"
 
+SERVERS = {
+    "EU server (zentracloud.eu)": "https://zentracloud.eu",
+    "US server (zentracloud.com)": "https://zentracloud.com",
+}
+
 
 st.set_page_config(
     page_title="ZENTRA Hydro Event Analyzer",
@@ -30,8 +34,8 @@ st.set_page_config(
 
 st.title("🌧️ ZENTRA Hydro Event Analyzer")
 st.caption(
-    "Rainfall from one ZENTRA logger + water level from another, "
-    "with automatic event detection and hydrological timing metrics."
+    "ZENTRA Cloud 1.0 / API v4 · precipitation from one logger + water level "
+    "from another · automatic rainfall-event analysis."
 )
 
 
@@ -95,11 +99,26 @@ def best_option_index(options, measurement_terms, sensor_terms):
 
 with st.sidebar:
     st.header("Connection")
-    saved_key = secret_or_env("ZENTRA_API_KEY")
-    api_key = saved_key or st.text_input(
-        "ZENTRA API key",
+
+    api_server_label = st.selectbox(
+        "ZENTRA Cloud 1.0 server",
+        list(SERVERS.keys()),
+        index=0,
+        help=(
+            "Choose the same regional server you use to sign in to ZENTRA Cloud 1.0. "
+            "Romanian/EU accounts are usually on zentracloud.eu."
+        ),
+    )
+    api_server = SERVERS[api_server_label]
+
+    saved_token = secret_or_env("ZENTRA_API_TOKEN") or secret_or_env("ZENTRA_API_KEY")
+    api_token = saved_token or st.text_input(
+        "ZENTRA API token",
         type="password",
-        help="The key is sent only to api.zentracloud.io from this app.",
+        help=(
+            "ZENTRA Cloud 1.0: API → Keys → Copy Token. "
+            "You may paste either 'Token abc123...' or only 'abc123...'."
+        ),
     )
 
     precip_device = st.text_input(
@@ -113,11 +132,16 @@ with st.sidebar:
 
     st.header("Download window")
     today = date.today()
-    default_start = today - timedelta(days=14)
+    default_start = today - timedelta(days=3)
     start_date = st.date_input("From", value=default_start)
     end_date = st.date_input("To", value=today)
 
     local_tz = st.text_input("Local timezone", value=LOCAL_TZ_DEFAULT)
+
+    st.caption(
+        "ZENTRA 1.0 v4 allows only one call per minute per device. "
+        "Keep the window reasonably short so each logger fits in one API page."
+    )
 
     st.header("Event detection")
     dry_gap = st.number_input(
@@ -157,35 +181,26 @@ with st.sidebar:
 
 
 if fetch_clicked:
-    if not api_key:
-        st.error("Enter your ZENTRA API key first.")
+    if not api_token:
+        st.error("Enter your ZENTRA Cloud 1.0 API token first.")
         st.stop()
     if start_date > end_date:
         st.error("'From' must be before or equal to 'To'.")
         st.stop()
-    if (end_date - start_date).days > 62:
-        st.warning(
-            "For interactive work, a shorter window is better because ZENTRA v5 "
-            "paginates device data by UTC calendar month and applies per-device rate limits."
-        )
 
-    try:
-        local_start = local_midnight(start_date, local_tz)
-        local_end_exclusive = local_midnight(end_date + timedelta(days=1), local_tz)
-        utc_start = local_start.tz_convert("UTC").to_pydatetime()
-        utc_end = local_end_exclusive.tz_convert("UTC").to_pydatetime()
-    except Exception as exc:
-        st.error(f"Invalid timezone: {exc}")
-        st.stop()
+    # v4 accepts start/end as ordinary date-time strings. We submit local clock
+    # times matching the user's chosen calendar dates.
+    local_start = datetime.combine(start_date, time.min)
+    local_end = datetime.combine(end_date, time(23, 59, 59))
 
-    with st.spinner("Fetching precipitation and water-level data from ZENTRA Cloud v5…"):
+    with st.spinner("Fetching data from ZENTRA Cloud 1.0 API v4…"):
         try:
-            with ZentraV5Client(api_key) as client:
+            with ZentraV4Client(api_token, server=api_server) as client:
                 precip_raw = client.get_device_data(
-                    precip_device, utc_start, utc_end, units="metric"
+                    precip_device, local_start, local_end
                 )
                 water_raw = client.get_device_data(
-                    water_device, utc_start, utc_end, units="metric"
+                    water_device, local_start, local_end
                 )
         except ZentraAPIError as exc:
             st.error(str(exc))
@@ -202,14 +217,15 @@ if fetch_clicked:
         "tz": local_tz,
         "precip_device": precip_device,
         "water_device": water_device,
+        "server": api_server,
     }
 
 
 if "precip_raw" not in st.session_state or "water_raw" not in st.session_state:
     st.info(
-        "Choose a date window, then click **Fetch data**. "
-        "The app will read precipitation from z6-10438 and water level from z6-10439 "
-        "by default."
+        "Select the ZENTRA Cloud 1.0 server and a date window, then click "
+        "**Fetch data**. The default devices are z6-10438 for precipitation "
+        "and z6-10439 for water level."
     )
     st.stop()
 
@@ -222,7 +238,10 @@ with c1:
     st.subheader("Precipitation series")
     precip_options = make_series_options(precip_raw)
     if not precip_options:
-        st.error("No valid measurement series were returned by the precipitation logger.")
+        st.error(
+            "No measurement series were returned by the precipitation logger. "
+            "Check server, date range, logger access and API subscription."
+        )
         st.stop()
     p_default = best_option_index(
         precip_options,
@@ -240,12 +259,15 @@ with c2:
     st.subheader("Water-level series")
     water_options = make_series_options(water_raw)
     if not water_options:
-        st.error("No valid measurement series were returned by the water-level logger.")
+        st.error(
+            "No measurement series were returned by the water-level logger. "
+            "Check server, date range, logger access and API subscription."
+        )
         st.stop()
     w_default = best_option_index(
         water_options,
-        measurement_terms=["water level", "water depth", "level", "depth"],
-        sensor_terms=["ctd"],
+        measurement_terms=["water level", "water depth", "level", "depth", "pressure"],
+        sensor_terms=["ctd", "hydros"],
     )
     w_label = st.selectbox(
         "Select water-level measurement",
@@ -275,10 +297,10 @@ water = prepare_series(
 )
 
 if precip.empty:
-    st.error("The selected precipitation series has no valid values in the requested window.")
+    st.error("The selected precipitation series has no valid values in this window.")
     st.stop()
 if water.empty:
-    st.error("The selected water-level series has no valid values in the requested window.")
+    st.error("The selected water-level series has no valid values in this window.")
     st.stop()
 
 
@@ -339,38 +361,16 @@ m4.metric("T_c", f"{metrics.tc_min:.0f} min")
 
 m5, m6, m7, m8 = st.columns(4)
 m5.metric("Rainfall duration", f"{metrics.duration_min:.0f} min")
-m6.metric(
-    "Rainfall centroid",
-    metrics.rainfall_centroid.strftime("%H:%M"),
-)
-m7.metric(
-    "Peak water level",
-    f"{metrics.water_peak:.1f} {metrics.water_unit}",
-)
-m8.metric(
-    "Peak time",
-    metrics.water_peak_time.strftime("%H:%M"),
-)
+m6.metric("Rainfall centroid", metrics.rainfall_centroid.strftime("%H:%M"))
+m7.metric("Peak water level", f"{metrics.water_peak:.1f} {metrics.water_unit}")
+m8.metric("Peak time", metrics.water_peak_time.strftime("%H:%M"))
 
 if metrics.water_rise is not None:
     st.caption(
         f"Pre-event median water level ≈ {metrics.baseline_water:.2f} "
-        f"{metrics.water_unit}; rise to peak ≈ {metrics.water_rise:.2f} {metrics.water_unit}."
+        f"{metrics.water_unit}; rise to peak ≈ {metrics.water_rise:.2f} "
+        f"{metrics.water_unit}."
     )
-
-if metrics.water_peak_time >= event.last_rain + pd.Timedelta(minutes=float(after_buffer) - 1):
-    st.warning(
-        "The maximum water level occurs at the end of the post-event search window. "
-        "Increase 'Search / plot after last rain' because the true peak may be later."
-    )
-
-if metrics.lag_min < 0:
-    st.warning(
-        "The water-level maximum occurs before the rainfall centroid. "
-        "Check event boundaries, water-level series selection, or whether this is a "
-        "compound event."
-    )
-
 
 tab_after, tab_before, tab_data = st.tabs(
     ["Analyzed event", "Raw event", "Data & export"]
@@ -387,10 +387,9 @@ with tab_after:
         annotated=True,
     )
     st.plotly_chart(annotated_fig, use_container_width=True)
-
     st.caption(
-        "Definitions used here: t_lag = time from rainfall centroid to peak water level; "
-        "T_c = operational rainfall-start-to-peak time, matching the annotated example."
+        "t_lag = rainfall centroid → peak water level. "
+        "T_c = rainfall start → peak water level, matching your annotated example."
     )
 
 with tab_before:
@@ -427,7 +426,6 @@ with tab_data:
     ).sort_values("datetime")
 
     dc1, dc2, dc3 = st.columns(3)
-
     dc1.download_button(
         "Download metrics CSV",
         data=metrics_df.to_csv(index=False).encode("utf-8"),
@@ -435,7 +433,6 @@ with tab_data:
         mime="text/csv",
         use_container_width=True,
     )
-
     dc2.download_button(
         "Download event data CSV",
         data=merged.to_csv(index=False).encode("utf-8"),
@@ -454,7 +451,7 @@ with tab_data:
             use_container_width=True,
         )
     except Exception:
-        dc3.info("PNG export needs the Kaleido package from requirements.txt.")
+        dc3.info("PNG export needs Kaleido from requirements.txt.")
 
     with st.expander("Show raw ZENTRA rows"):
         st.markdown("**Precipitation logger**")
