@@ -10,6 +10,7 @@ from zentra_api import ZentraV4Client, ZentraAPIError
 from hydrology import (
     analyze_event,
     build_event_figure,
+    build_overview_figure,
     detect_rain_events,
     metrics_to_frame,
     normalize_precipitation_to_depth,
@@ -234,6 +235,12 @@ if "precip_raw" not in st.session_state or "water_raw" not in st.session_state:
 precip_raw = st.session_state["precip_raw"]
 water_raw = st.session_state["water_raw"]
 
+if len(precip_raw) >= 9950 or len(water_raw) >= 9950:
+    st.warning(
+        "The download is close to the current per-page limit. If you expected more data "
+        "or more events, reduce the date range and fetch again so the entire series fits in one API page."
+    )
+
 c1, c2 = st.columns(2)
 with c1:
     st.subheader("Precipitation series")
@@ -322,15 +329,39 @@ if not events:
     st.stop()
 
 
+st.divider()
+st.subheader("Overview of downloaded series")
+st.caption(
+    f"Detected **{len(events)} rainfall events** in the selected download window. "
+    "Blue shaded windows in the overview mark the identified rainfall events."
+)
+overview_fig = build_overview_figure(precip, water, events)
+st.plotly_chart(overview_fig, use_container_width=True)
+
+event_rows = []
+for i, ev in enumerate(events, start=1):
+    event_rows.append(
+        {
+            "event_id": f"E{i}",
+            "start": ev.start.strftime("%Y-%m-%d %H:%M"),
+            "end": ev.last_rain.strftime("%Y-%m-%d %H:%M"),
+            "duration_min": round(ev.duration_min, 1),
+            "total_rainfall_mm": round(ev.total_mm, 3),
+            "rainy_intervals": ev.n_rainy_intervals,
+        }
+    )
+event_table_df = pd.DataFrame(event_rows)
+with st.expander("Show detected-event table", expanded=False):
+    st.dataframe(event_table_df, use_container_width=True, hide_index=True)
+
 event_labels = []
-for ev in events:
+for i, ev in enumerate(events, start=1):
     event_labels.append(
-        f"{ev.start.strftime('%Y-%m-%d %H:%M')} → "
+        f"E{i} | {ev.start.strftime('%Y-%m-%d %H:%M')} → "
         f"{ev.last_rain.strftime('%H:%M')}  |  "
         f"P={ev.total_mm:.2f} mm  |  duration={ev.duration_min:.0f} min"
     )
 
-st.divider()
 st.subheader("Select event")
 selected_label = st.selectbox(
     "Detected rainfall events",

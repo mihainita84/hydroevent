@@ -592,6 +592,84 @@ def build_event_figure(
     return fig
 
 
+def build_overview_figure(
+    precip: pd.DataFrame,
+    water: pd.DataFrame,
+    events: List[RainEvent],
+):
+    """Overview figure for the full downloaded window, with detected events highlighted."""
+    p = precip.copy()
+    w = water.copy()
+
+    p_unit = p["unit"].iloc[0] if not p.empty and "unit" in p else "mm"
+    w_unit = w["unit"].iloc[0] if not w.empty and "unit" in w else ""
+
+    fig = make_subplots(specs=[[{"secondary_y": True}]])
+
+    interval_min = estimate_interval_minutes(p) if not p.empty else 5.0
+    bar_width_ms = interval_min * 60 * 1000 * 0.68
+
+    fig.add_trace(
+        go.Bar(
+            x=p["datetime"],
+            y=p["value"],
+            name=f"Precipitation ({p_unit})",
+            marker_color="#F9C400",
+            width=bar_width_ms,
+            opacity=0.9,
+            hovertemplate="%{x|%d %b %H:%M}<br>Precipitation: %{y:.3f} " + p_unit + "<extra></extra>",
+        ),
+        secondary_y=False,
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=w["datetime"],
+            y=w["value"],
+            name=f"Water level ({w_unit})",
+            mode="lines",
+            line=dict(color="#D45A00", width=2),
+            hovertemplate="%{x|%d %b %H:%M}<br>Water level: %{y:.2f} " + w_unit + "<extra></extra>",
+        ),
+        secondary_y=True,
+    )
+
+    for i, ev in enumerate(events, start=1):
+        fig.add_vrect(
+            x0=ev.start,
+            x1=ev.end_exclusive,
+            fillcolor="rgba(11, 76, 203, 0.10)",
+            line_width=0,
+            layer="below",
+        )
+        fig.add_annotation(
+            x=ev.start + (ev.end_exclusive - ev.start) / 2,
+            y=1.02,
+            xref="x",
+            yref="paper",
+            text=f"<b>E{i}</b>",
+            showarrow=False,
+            font=dict(size=11, color="#0B4CCB"),
+            bgcolor="rgba(255,255,255,0.75)",
+            bordercolor="#0B4CCB",
+            borderwidth=1,
+        )
+
+    fig.update_yaxes(title_text=f"Precipitation ({p_unit})", secondary_y=False, rangemode="tozero")
+    fig.update_yaxes(title_text=f"Water level ({w_unit})", secondary_y=True)
+    fig.update_xaxes(title_text="Local time", showgrid=False, tickformat="%d %b %H:%M")
+    fig.update_layout(
+        height=420,
+        barmode="overlay",
+        hovermode="x unified",
+        legend=dict(orientation="h", yanchor="bottom", y=1.08, xanchor="center", x=0.5),
+        margin=dict(l=65, r=75, t=90, b=55),
+        template="plotly_white",
+        title=None,
+    )
+    return fig
+
+
+
 def metrics_to_frame(metrics: EventMetrics) -> pd.DataFrame:
     return pd.DataFrame(
         [

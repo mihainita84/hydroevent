@@ -79,3 +79,43 @@ The event interface calculates:
 - rise to peak
 
 It provides both the raw and annotated event figures and CSV/PNG export.
+
+## v4.1 fix
+
+Fixed sensor position/depth matching for ZENTRA v4 responses where `position` may be text such as `0.2 m`, blank, or non-numeric.
+
+
+## v4.2 fixes
+
+1. **Rainfall centroid / t_lag fix**  
+   The previous code converted pandas internal datetime integers assuming nanoseconds.
+   On environments using microsecond datetime resolution, that produced dates near 1970
+   and therefore enormous lag values. v4.2 calculates the centroid from explicit POSIX
+   timestamps and checks that the centroid lies inside the event.
+
+2. **Annotated graph compression fix**  
+   The annotated plot now pins the x-axis to the selected event window. A bad annotation
+   can no longer stretch the axis and squeeze the precipitation and water-level traces
+   into a vertical strip.
+
+3. **ECRN precipitation rate conversion**  
+   If ZENTRA returns precipitation in `mm/h`, the app converts each logger interval to
+   rainfall depth in `mm` before calculating total rainfall. For a 5-minute logger:
+   `depth_mm = rate_mm_h * 5/60`. Peak intensity remains in `mm/h`.
+
+
+## v4.3 improvements
+
+1. **Full-series overview graph added**  
+   The app now shows a graph for the entire downloaded period before the event selector.  
+   Detected rainfall events are highlighted with blue shaded windows and labelled `E1`, `E2`, etc.
+
+2. **Detected-event table added**  
+   An expandable table lists all identified events with start, end, duration, total rainfall and number of rainy intervals.
+
+3. **Larger v4 `per_page` request**  
+   The client now asks for up to 10,000 records in one v4 call.  
+   This helps month-long 5-minute series fit into one response and prevents the app from showing only the first few events.
+
+4. **Near-limit warning**  
+   If the download is close to the current per-page cap, the app warns that the selected time window may be too large.

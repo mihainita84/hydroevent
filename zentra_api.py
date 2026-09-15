@@ -209,7 +209,7 @@ class ZentraV4Client:
         device_sn: str,
         start_datetime: datetime,
         end_datetime: datetime,
-        per_page: int = 2000,
+        per_page: int = 10000,
     ) -> pd.DataFrame:
         url = f"{self.server}/api/v4/get_readings/"
         params = {
@@ -218,7 +218,7 @@ class ZentraV4Client:
             "end_date": end_datetime.strftime("%Y-%m-%d %H:%M:%S"),
             "output_format": "json",
             "page_num": 1,
-            "per_page": min(int(per_page), 2000),
+            "per_page": min(int(per_page), 50000),
             "sort_by": "ascending",
             "device_depth": "true",
         }
